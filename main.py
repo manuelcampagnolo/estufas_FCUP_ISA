@@ -9,11 +9,14 @@ from rasterio.warp import reproject, Resampling, calculate_default_transform # r
 from osgeo import gdal # 
 from osgeo.gdalconst import GA_Update # no data
 
-# load auxiliary functions
+# DATA and FUNCTIONS FOLDERS: ADAPT
+myfolder=r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\investigacao-projectos-reviews-alunos\UPorto-estufas'
 folderfunctions=r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\scripts_gee_py_R\scripts_python_functions'
+
+# load auxiliary functions
 exec(open(os.path.join(folderfunctions,'auxiliary_functions.py').encode('utf-8')).read())
 
-
+############################################################# project, canvas, etc
 parent=iface.mainWindow() # necessary for QMessageBox
 
 # project and data set CRS
@@ -27,9 +30,8 @@ bridge = QgsLayerTreeMapCanvasBridge(myroot, mycanvas)
 # set project CRS
 myproject.setCrs(QgsCoordinateReferenceSystem(my_crs))
 
-# DATA
+############################################################ input DATA
 # data structure for tif files: myfolder/'resultados'/'Tiffs'/str(year))
-myfolder=r'C:\Users\mlc\OneDrive - Universidade de Lisboa\Documents\investigacao-projectos-reviews-alunos\UPorto-estufas'
 myfoldertiffs=os.path.join(myfolder,'resultados','Tiffs')
 years=[str(f) for f in os.listdir(myfoldertiffs) if not os.path.isfile(os.path.join(myfoldertiffs,f)) and re.search('20',f)]
 mylegend={
@@ -56,6 +58,34 @@ for val, (label, Qcol, opac) in mylegend.items():
 #7 - Praias
 #8 - Água 1
 #9 - Água 2
+
+# create legend for polygonized multiannual map of 'estufas'
+mylegend111={
+'..-..-21': ('001',QColor('pink'),1),
+'..-20-21': ('011',QColor('orange'),1),
+'19-20-21': ('111',QColor('red'),1),
+'19-20-..': ('110',QColor('light blue'),1),
+'19-..-..': ('100',QColor('blue'),1),
+'19-..-21': ('101',QColor('yellow'),1),
+'..-20-..': ('010',QColor('brown'),1)}
+
+# create legend for polygonized multiannual map of 'estufas'
+mylegend1111={
+'..-..-21-..': ('0010',QColor('yellow'),1),
+'..-20-21-..': ('0110',QColor('brown'),1),
+'19-20-21-..': ('1110',QColor('light blue'),1),
+'19-20-..-..': ('1100',QColor('blue'),1),
+'19-..-..-..': ('1000',QColor('blue'),1),
+'19-..-21-..': ('1010',QColor('brown'),1),
+'..-20-..-..': ('0100',QColor('yellow'),1),
+'..-..-21-22': ('0011',QColor('pink'),1),
+'..-20-21-22': ('0111',QColor('orange'),1),
+'19-20-21-22': ('1111',QColor('red'),1),
+'19-20-..-22': ('1101',QColor('yellow'),1),
+'19-..-..-22': ('1001',QColor('brown'),1),
+'19-..-21-22': ('1011',QColor('yellow'),1),
+'..-20-..-22': ('0101',QColor('brown'),1)}
+
 
 # NUTS
 nuts3=my_add_vector_layer(os.path.join(myfolder,'NUTS3.gpkg'),'NUTS3')
@@ -98,6 +128,8 @@ print(myoption)
 year=2020
 myopacity=0.1
 mylayers=[]
+exp='0' # expression for raster calculator
+label='' # '111' or '1111'
 for year in sorted(years): 
     aux=os.path.join(myfoldertiffs,str(year))
     L=[f for f in os.listdir(aux) if os.path.isfile(os.path.join(aux,f)) and re.search(myoption+'.*tif$',f)]
@@ -121,25 +153,33 @@ for year in sorted(years):
     # change rlend for "estufa"
     myopacity+=0.1
     create_raster_ramp_legend(rlayer,rlegend, type='Exact', myopacity=myopacity)
+    if '2022' in years:
+        if int(year)==2022: exp=exp+'+1*("'+ln+'@1" = '+ str(valestufa)+')'
+        if int(year)==2021: exp=exp+'+10*("'+ln+'@1" = '+ str(valestufa)+')'
+        if int(year)==2020: exp=exp+'+100*("'+ln+'@1" = '+ str(valestufa)+')'
+        if int(year)==2019: exp=exp+'+1000*("'+ln+'@1" = '+ str(valestufa)+')'
+    else:
+        if int(year)==2021: exp=exp+'+1*("'+ln+'@1" = '+ str(valestufa)+')'
+        if int(year)==2020: exp=exp+'+10*("'+ln+'@1" = '+ str(valestufa)+')'
+        if int(year)==2019: exp=exp+'+100*("'+ln+'@1" = '+ str(valestufa)+')'
     mylayers.append(ln)
+    label=label+'1'
 
 # zoom para rlayer
 mycanvas.setExtent(rlayer.extent())
 mycanvas.refresh()
 
-# combine years: each pixel has a binary code (xyz) for x=2019, y=2020, z=2021
-exp='100*("'+mylayers[0]+'@1" = '+ str(valestufa)+')'
-exp=exp+'+10*("'+mylayers[1]+'@1" = '+ str(valestufa)+')'
-exp=exp+'+1*("'+mylayers[2]+'@1" = '+ str(valestufa)+')'
+# combine years: each pixel has a binary code (xyzw) for x=2019, y=2020, z=2021, w=2022
 dict_params={'EXPRESSION': exp, 'LAYERS': mylayers}
-rlayer=my_processing_run("qgis:rastercalculator",{},dict_params,'estufas_111')
+estufas_combined='estufas_'+label
+rlayer=my_processing_run("qgis:rastercalculator",{},dict_params,estufas_combined)
 
 # check nodata value
 nodatavalue=rlayer.dataProvider().sourceNoDataValue(1)
 
 # save rlayer as tif
 if False: 
-    fout=os.path.join(myfoldertiffs,myoption+'_111.tif')
+    fout=os.path.join(myfoldertiffs,myoption+'_'+label+'.tif')
     pipe = QgsRasterPipe()
     pipe.set(rlayer.dataProvider().clone())
     file_writer = QgsRasterFileWriter(fout)
@@ -150,26 +190,24 @@ fout=os.path.join(myfolder,myoption+'_polys_estufas.gpkg')
 if os.path.exists(fout):
     res=QMessageBox.question(parent,'Question', 'Existe ficheiro polys_estufas. Usar?' )
 if res==QMessageBox.No or not os.path.exists(fout):
-    # Polygonize and obtain polygons with DN=0, 1, 10, 11, 100, 101, 110, 111
+    # Polygonize and obtain polygons with DN=0, 1, 10, 11, 100, 101, 110, 111,...
     dict_params={'BAND':1,'FIELD':'DN','EIGHT_CONNECTEDNESS':True}
-    mylayer=my_processing_run("gdal:polygonize",'estufas_111',dict_params,'polys_111')
+    mylayer=my_processing_run("gdal:polygonize",estufas_combined,dict_params,'polys')
     # Select polygons with value not 0
     dict_params={'EXPRESSION': ' "DN" != 0'}
-    vlayer=my_processing_run("native:extractbyexpression",'polys_111',dict_params,'polys_estufas')
+    vlayer=my_processing_run("native:extractbyexpression",'polys',dict_params,'polys_estufas')
     # save polygons to fout
     vlayer.selectAll()
     processing.run("native:saveselectedfeatures", {'INPUT': 'polys_estufas','OUTPUT': fout})
-else: 
-    vlayer=my_add_vector_layer(fout,'polys_estufas')
 
-# create legend for polygonized multiannual map of 'estufas'
-mylegend111={
-'..-..-21': ('001',QColor('pink'),1),
-'..-20-21': ('011',QColor('orange'),1),
-'19-20-21': ('111',QColor('red'),1),
-'19-20-..': ('110',QColor('light blue'),1),
-'19-..-..': ('100',QColor('blue'),1),
-'19-..-21': ('101',QColor('yellow'),1),
-'..-20-..': ('010',QColor('brown'),1)}
-create_categorized_legend_3_arg(vlayer,'DN',mylegend111)
-my_remove_layer('estufas_111')
+# read file
+vlayer=my_add_vector_layer(fout,'polys_estufas')
+
+if label=='1111':
+    create_categorized_legend_3_arg(vlayer,'DN',mylegend1111)
+
+if label=='111':
+    create_categorized_legend_3_arg(vlayer,'DN',mylegend111)
+
+my_remove_layer('estufas_'+label)
+
